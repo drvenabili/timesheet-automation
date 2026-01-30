@@ -64,3 +64,15 @@ The script will:
 -   **[Playwright](https://playwright.dev/python/)**: Browser automation.
 -   **[Pandas](https://pandas.pydata.org/)**: Excel data processing.
 -   **[Rich](https://rich.readthedocs.io/)**: Beautiful terminal output.
+
+## License
+
+This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+
+**This means:**
+- ✅ Personal use is allowed
+- ✅ Non-commercial use is allowed  
+- ✅ Use by educational and non-profit organizations is allowed
+- ❌ Commercial use (including by companies for their employees) is NOT allowed
+
+For commercial licensing options, please contact the project maintainer.
