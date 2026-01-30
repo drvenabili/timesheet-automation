@@ -2,7 +2,8 @@ from playwright.sync_api import sync_playwright, Page
 from typing import List, Dict
 from datetime import datetime, timedelta
 from excel_reader import DayEntry
-from time import sleep
+import time
+import os
 from rich.console import Console
 
 console = Console()
@@ -42,7 +43,51 @@ class WebAutomator:
             except Exception as e:
                  console.print(f"[yellow]Could not navigate directly (maybe invalid URL?). Opening empty page.[/yellow]")
 
-            console.print("[bold yellow]PLEASE LOGIN MANUALLY.[/bold yellow]")
+            # Auto-login Logic
+            username = os.getenv("TIMESHEET_USER")
+            password = os.getenv("TIMESHEET_PASSWORD")
+            #console.print(f"[blue]{username} --- {password}[/blue]")
+
+            if username and password:
+                console.print("[blue]Credentials found (USER/PASSWORD). Attempting auto-login...[/blue]")
+                try:
+                    # Give page a moment to load inputs
+                    page.wait_for_selector("input[type='password']", timeout=3000)
+                    
+                    if page.locator("input[type='password']").is_visible():
+                        # Fill Username - Specific for the provided HTML
+                        if page.locator("input[name='_username']").count() > 0:
+                            page.fill("input[name='_username']", username)
+                        else:
+                            # Fallback
+                            page.fill("input[type='text']", username)
+                            
+                        # Fill Password - Specific for the provided HTML
+                        if page.locator("input[name='_password']").count() > 0:
+                            page.fill("input[name='_password']", password)
+                        else:
+                            page.fill("input[type='password']", password)
+                        
+                        # Click Submit
+                        if page.locator("button[name='_submit']").count() > 0:
+                            page.click("button[name='_submit']")
+                        else:
+                            page.click("button[type='submit']")
+                            
+                        console.print("[blue]Credentials submitted.[/blue]")
+                        
+                        # Check for "Bad credentials" error
+                        try:
+                            if page.locator(".alert-error:has-text('Bad credentials')").is_visible(timeout=3000):
+                                console.print("[red]Login failed: Bad credentials reported by website.[/red]")
+                                console.print("[yellow]Please check your .env file or login manually.[/yellow]")
+                        except:
+                            pass
+                            
+                except Exception as e:
+                    console.print(f"[dim]Auto-login issue: {e}[/dim]")
+
+            console.print("[bold yellow]Waiting for login...[/bold yellow]")
             console.print("I will wait until I see the 'My Sheet' or the Project container.")
             
             # Wait for the project container from the source code provided
@@ -150,7 +195,7 @@ class WebAutomator:
                     console.print("[yellow]Warning: specific 'Time saved' message not detected, but save command sent.[/yellow]")
                 
                 # Small buffer before next week
-                sleep(1)
+                time.sleep(1)
             
             console.print("\n[green]Done processing weeks.[/green]")
             input("Press Enter to close browser...")
