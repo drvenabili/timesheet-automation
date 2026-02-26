@@ -1,3 +1,5 @@
+import shutil
+
 import typer
 from pathlib import Path
 from rich.console import Console
@@ -40,9 +42,27 @@ def fill(
         os.getenv("TIMESHEET_URL"), 
         help="The URL of the timesheet website. Defaults to TIMESHEET_URL env var."
     ),
-    headless: bool = typer.Option(False, help="Run browser in headless mode")
+    headless: bool = typer.Option(False, help="Run browser in headless mode"),
+    excelpath: bool = typer.Option(False, help="Whether we copy the file into the 'sheet' directory (source path in env var)")
 ):
     """Read a specific month sheet and automate the web filling process."""
+    if excelpath:
+        source_path = os.getenv("SHEET_SOURCE_PATH")
+        if not source_path:
+            console.print("[red]SHEET_SOURCE_PATH environment variable not set.[/red]")
+        else:
+            os.makedirs("sheet", exist_ok=True)
+            for file in os.listdir("sheet"):
+                file_path = os.path.join("sheet", file)
+                os.remove(file_path)
+    
+            try:
+                shutil.copy(source_path, "sheet/")
+                console.print(f"[green]File copied to 'sheet/' directory successfully.[/green]")
+            except Exception as e:
+                console.print(f"[red]Failed to copy file: {e}[/red]")               
+                sys.exit(1)
+
     file_path = get_excel_file()
     reader = ExcelReader(file_path)
     
