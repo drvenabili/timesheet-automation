@@ -48,9 +48,16 @@ Automate the filling for a specific month. You will be prompted to log in manual
 uv run main.py fill "January 2026"
 ```
 
+By default, the command now copies the source Excel file into `sheet/` (equivalent to `--excelpath`).
+If you want to skip that copy step, use:
+
+```bash
+uv run main.py fill "January 2026" --no-excelpath
+```
+
 The script will:
 1.  Read the data from the specified Excel sheet.
-2.  Open **Firefox**.
+2.  Open a browser (auto-selects Chromium first, with fallback support).
 3.  Wait for you to log in manually.
 4.  Navigate through the weeks corresponding to the dates.
 5.  Fill in hours (Full day = 8h, Half day = 4h) and comments.

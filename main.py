@@ -43,7 +43,8 @@ def fill(
         help="The URL of the timesheet website. Defaults to TIMESHEET_URL env var."
     ),
     headless: bool = typer.Option(False, help="Run browser in headless mode"),
-    excelpath: bool = typer.Option(False, help="Whether we copy the file into the 'sheet' directory (source path in env var)")
+    browser: str = typer.Option("auto", help="Browser engine: auto, chromium, firefox, or webkit"),
+    excelpath: bool = typer.Option(True, help="Copy the source file into the 'sheet' directory (disable with --no-excelpath)")
 ):
     """Read a specific month sheet and automate the web filling process."""
     if excelpath:
@@ -90,7 +91,7 @@ def fill(
     console.print(table)
     
     if typer.confirm("Do you want to proceed with web automation?"):
-        automator = WebAutomator(url, headless=headless)
+        automator = WebAutomator(url, headless=headless, browser=browser)
         automator.fill_timesheet(entries)
 
 if __name__ == "__main__":
