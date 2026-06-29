@@ -1,4 +1,4 @@
-from playwright.sync_api import sync_playwright, Page
+from playwright.sync_api import sync_playwright, Page, Error as PlaywrightError
 from typing import List, Dict
 from datetime import datetime, timedelta
 from excel_reader import DayEntry
@@ -9,9 +9,37 @@ from rich.console import Console
 console = Console()
 
 class WebAutomator:
-    def __init__(self, url: str, headless: bool = False):
+    def __init__(self, url: str, headless: bool = False, browser: str = "auto"):
         self.url = url
         self.headless = headless
+        self.browser = browser.lower()
+
+    def _launch_browser(self, p):
+        browser_order = {
+            "auto": ["chromium", "firefox", "webkit"],
+            "chromium": ["chromium"],
+            "firefox": ["firefox"],
+            "webkit": ["webkit"],
+        }
+
+        order = browser_order.get(self.browser)
+        if not order:
+            raise ValueError(f"Unsupported browser '{self.browser}'. Use auto/chromium/firefox/webkit.")
+
+        launch_errors = []
+        for name in order:
+            try:
+                if name == "firefox":
+                    # Fedora Wayland can segfault Firefox in Playwright; force XWayland when possible.
+                    return p.firefox.launch(headless=self.headless, env={"MOZ_ENABLE_WAYLAND": "0"}), name
+                if name == "chromium":
+                    return p.chromium.launch(headless=self.headless), name
+                return p.webkit.launch(headless=self.headless), name
+            except PlaywrightError as e:
+                launch_errors.append(f"{name}: {e}")
+
+        error_message = "Failed to launch any browser.\n" + "\n\n".join(launch_errors)
+        raise RuntimeError(error_message)
 
     def _get_start_of_week_timestamp(self, date_obj: datetime) -> int:
         """Get the unix timestamp for the Monday of the week for a given date."""
@@ -33,7 +61,8 @@ class WebAutomator:
 
     def fill_timesheet(self, entries: List[DayEntry]):
         with sync_playwright() as p:
-            browser = p.firefox.launch(headless=self.headless)
+            browser, browser_name = self._launch_browser(p)
+            console.print(f"[blue]Using browser: {browser_name}[/blue]")
             context = browser.new_context()
             page = context.new_page()
             
