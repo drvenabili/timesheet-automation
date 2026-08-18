@@ -20,10 +20,25 @@ Automate the process of filling your monthly timesheets from an Excel file to th
     ```
 
 3.  **Configure Environment**:
-    Create a `.env` file in the root directory and add your timesheet URL:
+    Copy the example file and fill in your details:
+    ```bash
+    cp .env.example .env
+    ```
+    At minimum set your timesheet URL:
     ```
     TIMESHEET_URL=url-of-your-middleman's-timesheet
     ```
+    You can also set `TIMESHEET_USER` / `TIMESHEET_PASSWORD` for auto-login, and
+    `SHEET_SOURCE_PATH` to point at your source Excel file.
+
+    Optionally, if your account has more than one timesheet box (project), you can
+    pin which one to fill by its numeric project ID (the number in
+    `projectTimeFormContainer<ID>`):
+    ```
+    TIMESHEET_PROJECT_ID=1308
+    ```
+    If unset, the **first** box on the page is used. Run `uv run main.py list-boxes`
+    to discover the available IDs.
 
 4.  **Place your Excel sheet**:
     Ensure your Excel timesheet is in the `sheet/` directory.
@@ -40,6 +55,18 @@ Check which months are available in your Excel file:
 uv run main.py list-sheets
 ```
 
+### List Available Boxes (Projects)
+
+If your account shows more than one timesheet box, discover their project IDs:
+
+```bash
+uv run main.py list-boxes
+```
+
+This opens the site, logs you in, and prints each box's project ID (marking the
+first one as the default). Use an ID with `--project-id` on the `fill` command,
+or set `TIMESHEET_PROJECT_ID` in your `.env`.
+
 ### Fill Timesheet
 
 Automate the filling for a specific month. You will be prompted to log in manually in the browser window.
@@ -47,6 +74,15 @@ Automate the filling for a specific month. You will be prompted to log in manual
 ```bash
 uv run main.py fill "January 2026"
 ```
+
+To target a specific box (when more than one is present), pass its project ID:
+
+```bash
+uv run main.py fill "January 2026" --project-id 1308
+```
+
+If `--project-id` is omitted, the tool uses `TIMESHEET_PROJECT_ID` from `.env`, or
+falls back to the first box on the page.
 
 By default, the command now copies the source Excel file into `sheet/` (equivalent to `--excelpath`).
 If you want to skip that copy step, use:

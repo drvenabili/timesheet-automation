@@ -36,6 +36,19 @@ def list_sheets():
     console.print(table)
 
 @app.command()
+def list_boxes(
+    url: str = typer.Option(
+        os.getenv("TIMESHEET_URL"),
+        help="The URL of the timesheet website. Defaults to TIMESHEET_URL env var."
+    ),
+    headless: bool = typer.Option(False, help="Run browser in headless mode"),
+    browser: str = typer.Option("auto", help="Browser engine: auto, chromium, firefox, or webkit"),
+):
+    """Open the site, log in, and list the available timesheet box (project) IDs."""
+    automator = WebAutomator(url, headless=headless, browser=browser)
+    automator.list_boxes()
+
+@app.command()
 def fill(
     month: str = typer.Argument(..., help="The name of the sheet to process (e.g. 'June 2021')"),
     url: str = typer.Option(
@@ -44,6 +57,12 @@ def fill(
     ),
     headless: bool = typer.Option(False, help="Run browser in headless mode"),
     browser: str = typer.Option("auto", help="Browser engine: auto, chromium, firefox, or webkit"),
+    project_id: str = typer.Option(
+        os.getenv("TIMESHEET_PROJECT_ID"),
+        help="Numeric project ID of the timesheet box to fill (the number in "
+             "projectTimeFormContainer<ID>). Defaults to TIMESHEET_PROJECT_ID env var, "
+             "or the first box on the page if unset. Use 'list-boxes' to discover IDs."
+    ),
     excelpath: bool = typer.Option(True, help="Copy the source file into the 'sheet' directory (disable with --no-excelpath)")
 ):
     """Read a specific month sheet and automate the web filling process."""
@@ -91,7 +110,7 @@ def fill(
     console.print(table)
     
     if typer.confirm("Do you want to proceed with web automation?"):
-        automator = WebAutomator(url, headless=headless, browser=browser)
+        automator = WebAutomator(url, headless=headless, browser=browser, project_id=project_id)
         automator.fill_timesheet(entries)
 
 if __name__ == "__main__":

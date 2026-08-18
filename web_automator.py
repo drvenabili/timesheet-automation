@@ -9,10 +9,13 @@ from rich.console import Console
 console = Console()
 
 class WebAutomator:
-    def __init__(self, url: str, headless: bool = False, browser: str = "auto"):
+    def __init__(self, url: str, headless: bool = False, browser: str = "auto", project_id: str = None):
         self.url = url
         self.headless = headless
         self.browser = browser.lower()
+        # Optional stable numeric project ID (the number in projectTimeFormContainer<ID>).
+        # When None, the first box on the page is used (legacy behavior).
+        self.project_id = str(project_id).strip() if project_id else None
 
     def _launch_browser(self, p):
         browser_order = {
@@ -41,6 +44,135 @@ class WebAutomator:
         error_message = "Failed to launch any browser.\n" + "\n\n".join(launch_errors)
         raise RuntimeError(error_message)
 
+    def _open_and_login(self, page) -> bool:
+        """Navigate to the site, attempt auto-login, and wait for the project
+        container(s) to appear. Returns True once at least one box is visible."""
+        console.print(f"[blue]Navigating to {self.url}...[/blue]")
+        try:
+            page.goto(self.url)
+        except Exception as e:
+            console.print(f"[yellow]Could not navigate directly (maybe invalid URL?). Opening empty page.[/yellow]")
+
+        # Auto-login Logic
+        username = os.getenv("TIMESHEET_USER")
+        password = os.getenv("TIMESHEET_PASSWORD")
+
+        if username and password:
+            console.print("[blue]Credentials found (USER/PASSWORD). Attempting auto-login...[/blue]")
+            try:
+                # Give page a moment to load inputs
+                page.wait_for_selector("input[type='password']", timeout=3000)
+
+                if page.locator("input[type='password']").is_visible():
+                    # Fill Username - Specific for the provided HTML
+                    if page.locator("input[name='_username']").count() > 0:
+                        page.fill("input[name='_username']", username)
+                    else:
+                        # Fallback
+                        page.fill("input[type='text']", username)
+
+                    # Fill Password - Specific for the provided HTML
+                    if page.locator("input[name='_password']").count() > 0:
+                        page.fill("input[name='_password']", password)
+                    else:
+                        page.fill("input[type='password']", password)
+
+                    # Click Submit
+                    if page.locator("button[name='_submit']").count() > 0:
+                        page.click("button[name='_submit']")
+                    else:
+                        page.click("button[type='submit']")
+
+                    console.print("[blue]Credentials submitted.[/blue]")
+
+                    # Check for "Bad credentials" error
+                    try:
+                        if page.locator(".alert-error:has-text('Bad credentials')").is_visible(timeout=3000):
+                            console.print("[red]Login failed: Bad credentials reported by website.[/red]")
+                            console.print("[yellow]Please check your .env file or login manually.[/yellow]")
+                    except:
+                        pass
+
+            except Exception as e:
+                console.print(f"[dim]Auto-login issue: {e}[/dim]")
+
+        console.print("[bold yellow]Waiting for login...[/bold yellow]")
+        console.print("I will wait until I see the 'My Sheet' or the Project container.")
+
+        # Wait for the project container. The ID might change, so we look for prefix.
+        try:
+            page.wait_for_selector("div[id^='projectTimeFormContainer']", timeout=300000)  # 5 mins to login
+        except:
+            console.print("[red]Timeout waiting for login. Exiting.[/red]")
+            return False
+
+        console.print("[green]Login detected![/green]")
+        return True
+
+    def _available_project_ids(self, page) -> List[str]:
+        """Return the numeric IDs of all projectTimeFormContainer boxes on the page."""
+        containers = page.locator("div[id^='projectTimeFormContainer']")
+        ids = []
+        for i in range(containers.count()):
+            container_id = containers.nth(i).get_attribute("id") or ""
+            ids.append(container_id.replace("projectTimeFormContainer", ""))
+        return ids
+
+    def _resolve_project_id(self, page) -> str:
+        """Resolve which box (project ID) to operate on.
+
+        If self.project_id is set, verify a matching box exists and use it.
+        Otherwise fall back to the first box on the page (legacy behavior).
+        Returns the resolved project ID, or None if it cannot be resolved.
+        """
+        available = self._available_project_ids(page)
+
+        if self.project_id:
+            if self.project_id in available:
+                console.print(f"Using configured Project ID: [bold]{self.project_id}[/bold]")
+                return self.project_id
+            console.print(
+                f"[red]Configured project ID '{self.project_id}' not found on the page.[/red]"
+            )
+            if available:
+                console.print(f"[yellow]Available box IDs: {', '.join(available)}[/yellow]")
+            else:
+                console.print("[yellow]No timesheet boxes were found on the page.[/yellow]")
+            return None
+
+        # Legacy default: first box on the page.
+        if not available:
+            console.print("[red]No timesheet boxes were found on the page.[/red]")
+            return None
+        project_id = available[0]
+        console.print(f"Detected Project ID: [bold]{project_id}[/bold]")
+        return project_id
+
+    def list_boxes(self):
+        """Open the site, log in, and print the available timesheet box IDs."""
+        with sync_playwright() as p:
+            browser, browser_name = self._launch_browser(p)
+            console.print(f"[blue]Using browser: {browser_name}[/blue]")
+            context = browser.new_context()
+            page = context.new_page()
+
+            if not self._open_and_login(page):
+                return
+
+            available = self._available_project_ids(page)
+            if not available:
+                console.print("[yellow]No timesheet boxes were found on the page.[/yellow]")
+                return
+
+            console.print(f"\n[bold]Found {len(available)} timesheet box(es):[/bold]")
+            for idx, pid in enumerate(available):
+                default_hint = " [dim](default, first box)[/dim]" if idx == 0 else ""
+                console.print(f"  - Project ID [bold]{pid}[/bold]{default_hint}")
+            console.print(
+                "\nUse one of these with [bold]--project-id <ID>[/bold] "
+                "or set [bold]TIMESHEET_PROJECT_ID[/bold] in your .env file."
+            )
+
     def _get_start_of_week_timestamp(self, date_obj: datetime) -> int:
         """Get the unix timestamp for the Monday of the week for a given date."""
         # Adjust so Monday=0, Sunday=6
@@ -65,76 +197,15 @@ class WebAutomator:
             console.print(f"[blue]Using browser: {browser_name}[/blue]")
             context = browser.new_context()
             page = context.new_page()
-            
-            console.print(f"[blue]Navigating to {self.url}...[/blue]")
-            try:
-                page.goto(self.url)
-            except Exception as e:
-                 console.print(f"[yellow]Could not navigate directly (maybe invalid URL?). Opening empty page.[/yellow]")
 
-            # Auto-login Logic
-            username = os.getenv("TIMESHEET_USER")
-            password = os.getenv("TIMESHEET_PASSWORD")
-            #console.print(f"[blue]{username} --- {password}[/blue]")
-
-            if username and password:
-                console.print("[blue]Credentials found (USER/PASSWORD). Attempting auto-login...[/blue]")
-                try:
-                    # Give page a moment to load inputs
-                    page.wait_for_selector("input[type='password']", timeout=3000)
-                    
-                    if page.locator("input[type='password']").is_visible():
-                        # Fill Username - Specific for the provided HTML
-                        if page.locator("input[name='_username']").count() > 0:
-                            page.fill("input[name='_username']", username)
-                        else:
-                            # Fallback
-                            page.fill("input[type='text']", username)
-                            
-                        # Fill Password - Specific for the provided HTML
-                        if page.locator("input[name='_password']").count() > 0:
-                            page.fill("input[name='_password']", password)
-                        else:
-                            page.fill("input[type='password']", password)
-                        
-                        # Click Submit
-                        if page.locator("button[name='_submit']").count() > 0:
-                            page.click("button[name='_submit']")
-                        else:
-                            page.click("button[type='submit']")
-                            
-                        console.print("[blue]Credentials submitted.[/blue]")
-                        
-                        # Check for "Bad credentials" error
-                        try:
-                            if page.locator(".alert-error:has-text('Bad credentials')").is_visible(timeout=3000):
-                                console.print("[red]Login failed: Bad credentials reported by website.[/red]")
-                                console.print("[yellow]Please check your .env file or login manually.[/yellow]")
-                        except:
-                            pass
-                            
-                except Exception as e:
-                    console.print(f"[dim]Auto-login issue: {e}[/dim]")
-
-            console.print("[bold yellow]Waiting for login...[/bold yellow]")
-            console.print("I will wait until I see the 'My Sheet' or the Project container.")
-            
-            # Wait for the project container from the source code provided
-            # id="projectTimeFormContainer1308" - the ID might change, so we look for prefix
-            try:
-                page.wait_for_selector("div[id^='projectTimeFormContainer']", timeout=300000) # 5 mins to login
-            except:
-                console.print("[red]Timeout waiting for login. Exiting.[/red]")
+            if not self._open_and_login(page):
                 return
 
-            console.print("[green]Login detected![/green]")
-
-            # Extract Project ID
-            # We look for an ID like projectTimeFormContainerXXXX
-            container = page.locator("div[id^='projectTimeFormContainer']").first
-            container_id_str = container.get_attribute("id") 
-            project_id = container_id_str.replace("projectTimeFormContainer", "")
-            console.print(f"Detected Project ID: [bold]{project_id}[/bold]")
+            # Resolve which box (project) to fill.
+            project_id = self._resolve_project_id(page)
+            if not project_id:
+                return
+            project_container_selector = f"#projectTimeFormContainer{project_id}"
 
             weeks = self._group_by_week(entries)
             
@@ -165,7 +236,10 @@ class WebAutomator:
                 
                 try:
                     # Wait for the row with this date to appear
-                    page.wait_for_selector(f"tr:has-text('{check_date_str}')", timeout=10000)
+                    page.wait_for_selector(
+                        f"{project_container_selector} tr:has-text('{check_date_str}')",
+                        timeout=10000,
+                    )
                 except Exception:
                     console.print(f"[red]Timeout waiting for data for {check_date_str}. Skipping week.[/red]")
                     continue
@@ -175,9 +249,15 @@ class WebAutomator:
                 for entry in week_entries:
                     if not entry.status:
                         continue
+
+                    # Restrict automation to the first 5 rows (Mon-Fri) only.
+                    if entry.date.weekday() >= 5:
+                        continue
                         
                     formatted_date = format_date_web(entry.date)
-                    row = page.locator(f"tr:has-text('{formatted_date}')")
+                    row = page.locator(
+                        f"{project_container_selector} tr:has-text('{formatted_date}')"
+                    )
                     
                     if row.count() == 0:
                         console.print(f"[yellow]  Row not found for {formatted_date}[/yellow]")
